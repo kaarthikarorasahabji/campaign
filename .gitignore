@@ -8,3 +8,6 @@ data/
 venv/
 config/settings.yaml
 leads.db
+token.json
+credentials.json
+client_secret_*.json

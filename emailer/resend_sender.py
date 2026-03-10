@@ -21,7 +21,8 @@ def send_via_resend(to_email, subject, html_body, resend_config):
             "html": html_body,
         }
         r = resend.Emails.send(params)
-        logger.info(f"Resend sent to {to_email} (id: {r.get('id', 'ok')})")
+        email_id = r.get("id", "ok") if isinstance(r, dict) else str(r)
+        logger.info(f"Resend sent to {to_email} (id: {email_id})")
         return True
     except Exception as e:
         logger.error(f"Resend failed for {to_email}: {e}")

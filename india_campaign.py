@@ -2,8 +2,8 @@
 Worldwide cold email campaign.
 Scrapes Google Maps across India + 35+ countries,
 finds emails, sends personalized cold emails.
-India -> Gmail SMTP | International -> Resend API.
-Never sends to the same lead twice. Tracks scraped queries.
+India -> Gmail API (OAuth2/HTTPS) | International -> Resend API.
+Send first, then scrape. Never sends to the same lead twice.
 """
 import asyncio
 import logging
@@ -53,7 +53,7 @@ def load_config():
         config = {}
 
     # Defaults for when settings.yaml is missing (Railway / production)
-    config.setdefault("warmup_schedule", {3: 15, 7: 25, 14: 40, 999: 50})
+    config.setdefault("warmup_schedule", {3: 15, 7: 25, 14: 40, 999: 75})
     config.setdefault("target_categories", [
         "restaurants", "clinics", "dentists", "gyms", "pet shops",
         "car wash", "laundry", "salons", "spas", "cafes", "bakeries",
@@ -212,20 +212,16 @@ async def scrape_phase(config, max_queries=50):
 def send_phase(config):
     """
     Send cold emails to all unsent leads.
-    Supports EMAIL_METHOD env var:
-      - 'gmail'  = Gmail SMTP first, Resend fallback (for Oracle/Render)
-      - 'resend' = Resend API first, Gmail fallback (for Railway)
-      - 'auto'   = Gmail if available, else Resend (default)
+    India leads -> Gmail API (OAuth2/HTTPS)
+    International leads -> Resend API
     """
     sender_info = config.get("sender", {})
-    warmup_schedule = config.get("warmup_schedule", {999: 100})
+    warmup_schedule = config.get("warmup_schedule", {999: 75})
     email_settings = config.get("email_settings", {})
     resend_config = config.get("resend", {})
     daily_target = email_settings.get("daily_total_target", 100)
     min_delay = email_settings.get("min_delay_seconds", 15)
     max_delay = email_settings.get("max_delay_seconds", 45)
-
-    email_method = os.environ.get("EMAIL_METHOD", "auto").lower()
     has_resend = bool(resend_config.get("api_key"))
 
     reset_daily_counts()
@@ -235,8 +231,9 @@ def send_phase(config):
         logger.info("No unsent leads with emails available.")
         return 0
 
+    resend_limit = resend_config.get("daily_limit", 100)
     logger.info(f"\nSending emails to {len(leads)} leads...")
-    logger.info(f"  Email method: {email_method} (Resend available: {has_resend})")
+    logger.info(f"  Routing: India -> Gmail API, International -> Resend (limit: {resend_limit})")
 
     # Pre-load templates (with and without website variants)
     india_template = Template(load_template("India", has_website=True))
@@ -261,7 +258,6 @@ def send_phase(config):
     failed = 0
     resend_sent = 0
     gmail_sent = 0
-    resend_limit = resend_config.get("daily_limit", 100)
 
     for lead in leads:
         country = lead["country"] or ""
@@ -292,12 +288,11 @@ def send_phase(config):
             calendar_link=sender_info.get("calendar_link", ""),
         )
 
-
         success = False
         sender_id = ""
 
-        # --- Gmail SMTP first (Oracle / Render / local) ---
-        if email_method in ("gmail", "auto"):
+        if is_india:
+            # India leads -> Gmail API
             account = pick_gmail_account(warmup_schedule)
             if account:
                 success = send_email(lead["email"], subject, html_body, account)
@@ -305,34 +300,19 @@ def send_phase(config):
                 if success:
                     increment_sent_count(account["email"])
                     gmail_sent += 1
-            elif has_resend and resend_sent < resend_limit:
-                # Gmail at limit, fallback to Resend
-                success = send_via_resend(lead["email"], subject, html_body, resend_config)
-                sender_id = resend_config.get("from_email", "resend")
-                if success:
-                    resend_sent += 1
             else:
-                logger.warning("All sending methods exhausted.")
+                logger.warning("Gmail accounts exhausted (all at daily limit).")
                 break
-
-        # --- Resend API first (Railway) ---
-        elif email_method == "resend":
+        else:
+            # International leads -> Resend API
             if has_resend and resend_sent < resend_limit:
                 success = send_via_resend(lead["email"], subject, html_body, resend_config)
                 sender_id = resend_config.get("from_email", "resend")
                 if success:
                     resend_sent += 1
             else:
-                # Fallback to Gmail
-                account = pick_gmail_account(warmup_schedule)
-                if not account:
-                    logger.warning("All sending methods exhausted.")
-                    break
-                success = send_email(lead["email"], subject, html_body, account)
-                sender_id = account["email"]
-                if success:
-                    increment_sent_count(account["email"])
-                    gmail_sent += 1
+                logger.warning(f"Resend limit reached ({resend_sent}/{resend_limit}), skipping international leads.")
+                break
 
         status = "sent" if success else "bounced"
         template_name = "india_cold" if is_india else "international_cold"
@@ -370,7 +350,7 @@ def whatsapp_phase(config):
         WHERE phone IS NOT NULL AND phone != ''
           AND (email IS NULL OR email = '')
           AND whatsapp_sent = 0
-        ORDER BY created_at DESC
+        ORDER BY scraped_at DESC
         LIMIT 20
     """)
     leads = [dict(row) for row in cursor.fetchall()]
@@ -423,19 +403,19 @@ async def run_full_cycle(config, max_queries=50):
           f"{stats['pending']} pending, "
           f"{stats.get('queries_scraped', 0)} queries done")
 
-    # Phase 1: Scrape
-    print(f"\n[PHASE 1] Scraping Google Maps (up to {max_queries} queries)...")
+    # Phase 1: Send emails first (use existing leads)
+    unsent = get_total_unsent_count()
+    print(f"\n[PHASE 1] Sending emails ({unsent} pending)...")
+    sent = send_phase(config)
+
+    # Phase 2: Scrape for next cycle
+    print(f"\n[PHASE 2] Scraping Google Maps (up to {max_queries} queries)...")
     scraped = 0
     try:
         scraped = await scrape_phase(config, max_queries=max_queries)
         print(f"\nScraped {scraped} new leads.")
     except Exception as e:
-        print(f"\nScrape phase failed: {e} — proceeding to send phase with existing leads.")
-
-    # Phase 2: Send emails
-    unsent = get_total_unsent_count()
-    print(f"\n[PHASE 2] Sending emails ({unsent} pending)...")
-    sent = send_phase(config)
+        print(f"\nScrape phase failed: {e}")
 
     # Phase 3: WhatsApp for leads with phone but no email
     wa_sent = 0
