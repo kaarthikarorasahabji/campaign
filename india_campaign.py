@@ -44,7 +44,30 @@ def is_franchise(name):
 
 def load_config():
     with open(os.path.join(CONFIG_DIR, "settings.yaml"), encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+
+    # Override secrets from environment variables (for Railway / production)
+    # Gmail accounts from env
+    gmail_accounts = config.get("gmail_accounts", [])
+    env_accounts = []
+    for i in range(1, 6):  # Support up to 5 accounts
+        email = os.environ.get(f"GMAIL_{i}_EMAIL")
+        password = os.environ.get(f"GMAIL_{i}_APP_PASSWORD")
+        if email and password:
+            env_accounts.append({"email": email, "app_password": password, "active": True})
+    if env_accounts:
+        config["gmail_accounts"] = env_accounts
+
+    # Resend from env
+    resend_key = os.environ.get("RESEND_API_KEY")
+    if resend_key:
+        resend = config.get("resend", {})
+        resend["api_key"] = resend_key
+        resend["from_email"] = os.environ.get("RESEND_FROM_EMAIL", resend.get("from_email", ""))
+        resend["from_name"] = os.environ.get("RESEND_FROM_NAME", resend.get("from_name", ""))
+        config["resend"] = resend
+
+    return config
 
 
 def load_template(country):

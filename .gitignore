@@ -6,3 +6,5 @@ data/
 .env
 .venv/
 venv/
+config/settings.yaml
+leads.db

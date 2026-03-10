@@ -1,0 +1,57 @@
+# This is the template config - secrets come from environment variables.
+# See .env.example for the env vars to set.
+
+# Gmail accounts loaded from environment variables:
+# GMAIL_1_EMAIL, GMAIL_1_APP_PASSWORD
+# GMAIL_2_EMAIL, GMAIL_2_APP_PASSWORD (optional)
+
+# Warm-up schedule: {day_range_end: daily_limit}
+warmup_schedule:
+  3: 15
+  7: 25
+  14: 40
+  999: 50
+
+# Business categories to scrape
+target_categories:
+  - restaurants
+  - clinics
+  - dentists
+  - gyms
+  - pet shops
+  - car wash
+  - laundry
+  - salons
+  - spas
+  - cafes
+  - bakeries
+  - pharmacies
+  - coaching centers
+
+# Email sending settings
+email_settings:
+  min_delay_seconds: 20
+  max_delay_seconds: 60
+  daily_total_target: 50
+  send_hours_start: 9
+  send_hours_end: 19
+
+# Scraper settings
+scraper_settings:
+  min_delay_seconds: 2
+  max_delay_seconds: 5
+  max_results_per_query: 15
+  headless: true
+
+# Sender info
+sender:
+  name: "Kaarthik Dass Arora"
+  company: "Axenora Ai"
+  phone: "+91 7814051678"
+  website: "https://axenoraai.in"
+  calendar_link: "https://calendly.com/kaarthikdassarorasahabji"
+
+# Resend settings loaded from environment variables:
+# RESEND_API_KEY, RESEND_FROM_EMAIL, RESEND_FROM_NAME
+resend:
+  daily_limit: 50
