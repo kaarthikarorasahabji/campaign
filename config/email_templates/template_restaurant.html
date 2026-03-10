@@ -1,101 +1,188 @@
 <!DOCTYPE html>
 <html>
-<body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif;">
+<body style="margin:0;padding:0;background:#f0f2f5;font-family:'Segoe UI',Arial,Helvetica,sans-serif;">
 
 <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 15px;">
 <tr>
 <td align="center">
 
-<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;padding:40px;box-shadow:0 6px 18px rgba(0,0,0,0.08);">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.06);">
 
-<!-- Company Name -->
+<!-- Header Accent Bar -->
 <tr>
-<td style="font-size:20px;font-weight:bold;color:#111;">
-Axenora AI
+<td style="height:5px;background:linear-gradient(90deg,#4f46e5,#7c3aed,#4f46e5);font-size:0;line-height:0;">&nbsp;</td>
+</tr>
+
+<!-- Logo + Brand -->
+<tr>
+<td style="padding:32px 40px 0 40px;">
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr>
+<td>
+<span style="font-size:22px;font-weight:800;color:#1a1a2e;letter-spacing:-0.5px;">Axenora</span>
+<span style="font-size:22px;font-weight:300;color:#4f46e5;letter-spacing:-0.5px;"> AI</span>
+</td>
+<td align="right" style="font-size:11px;color:#a0a3b1;letter-spacing:1px;text-transform:uppercase;">
+AI-Powered Business
+</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<!-- Divider -->
+<tr>
+<td style="padding:20px 40px 0 40px;">
+<div style="height:1px;background:#eef0f4;"></div>
 </td>
 </tr>
 
 <!-- Greeting -->
 <tr>
-<td style="padding-top:25px;font-size:15px;color:#444;line-height:1.6;">
-Hi <strong>{{ business_name }}</strong>,
+<td style="padding:28px 40px 0 40px;font-size:16px;color:#2d2d3a;line-height:1.6;">
+Hi <strong style="color:#1a1a2e;">{{ business_name }}</strong>,
 </td>
 </tr>
 
 <!-- Intro -->
 <tr>
-<td style="padding-top:15px;font-size:15px;color:#444;line-height:1.7;">
-I came across your <strong>{{ category }}</strong> business in <strong>{{ city }}</strong> and had a quick question.
+<td style="padding:16px 40px 0 40px;font-size:15px;color:#52525e;line-height:1.75;">
+I came across your <strong style="color:#2d2d3a;">{{ category }}</strong> in <strong style="color:#2d2d3a;">{{ city }}</strong> and had a quick question:
 </td>
 </tr>
 
-<!-- Hook -->
+<!-- Hook Card -->
 <tr>
-<td style="padding-top:15px;font-size:15px;color:#333;background:#f7f8ff;border-left:4px solid #4f46e5;padding:16px;border-radius:6px;">
-<em>When customers call and nobody picks up — what usually happens?</em>
+<td style="padding:20px 40px 0 40px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:linear-gradient(135deg,#f8f7ff,#eef0ff);border-radius:12px;border-left:4px solid #4f46e5;">
+<tr>
+<td style="padding:20px 24px;">
+<span style="font-size:20px;line-height:1;">💭</span>
+<span style="font-size:15px;color:#2d2d3a;font-style:italic;margin-left:6px;">
+When customers call and nobody picks up — what usually happens?
+</span>
+</td>
+</tr>
+</table>
 </td>
 </tr>
 
 <!-- Explanation -->
 <tr>
-<td style="padding-top:18px;font-size:15px;color:#444;line-height:1.7;">
-Most businesses lose those customers. That's why we built an <strong>AI Call Assistant</strong> that answers calls automatically and handles bookings.
+<td style="padding:20px 40px 0 40px;font-size:15px;color:#52525e;line-height:1.75;">
+Most businesses lose those customers. That's why we built an <strong style="color:#1a1a2e;">AI Call Assistant</strong> that answers calls automatically and handles bookings.
 </td>
 </tr>
 
-<!-- Features -->
+<!-- Features Grid -->
 <tr>
-<td style="padding-top:18px;">
-<ul style="padding-left:20px;color:#444;font-size:14px;line-height:1.9;">
-<li>Answers calls 24/7</li>
-<li>Books appointments automatically</li>
-<li>Handles common customer questions</li>
-<li>Works even during busy hours</li>
-<li>Speaks Hindi & English naturally</li>
-</ul>
+<td style="padding:24px 40px 0 40px;">
+<table width="100%" cellpadding="0" cellspacing="0">
+
+<tr>
+<td width="50%" style="padding:0 8px 12px 0;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border-radius:10px;border:1px solid #f0f0f5;">
+<tr>
+<td style="padding:14px 16px;">
+<span style="font-size:18px;">🕐</span><br>
+<span style="font-size:13px;font-weight:600;color:#2d2d3a;line-height:2;">Answers 24/7</span><br>
+<span style="font-size:12px;color:#8b8b9e;">Never miss a call again</span>
+</td>
+</tr>
+</table>
+</td>
+<td width="50%" style="padding:0 0 12px 8px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border-radius:10px;border:1px solid #f0f0f5;">
+<tr>
+<td style="padding:14px 16px;">
+<span style="font-size:18px;">📅</span><br>
+<span style="font-size:13px;font-weight:600;color:#2d2d3a;line-height:2;">Auto Bookings</span><br>
+<span style="font-size:12px;color:#8b8b9e;">Appointments on autopilot</span>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+
+<tr>
+<td width="50%" style="padding:0 8px 12px 0;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border-radius:10px;border:1px solid #f0f0f5;">
+<tr>
+<td style="padding:14px 16px;">
+<span style="font-size:18px;">🗣️</span><br>
+<span style="font-size:13px;font-weight:600;color:#2d2d3a;line-height:2;">Hindi & English</span><br>
+<span style="font-size:12px;color:#8b8b9e;">Speaks naturally to callers</span>
+</td>
+</tr>
+</table>
+</td>
+<td width="50%" style="padding:0 0 12px 8px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;border-radius:10px;border:1px solid #f0f0f5;">
+<tr>
+<td style="padding:14px 16px;">
+<span style="font-size:18px;">⚡</span><br>
+<span style="font-size:13px;font-weight:600;color:#2d2d3a;line-height:2;">Peak Hours</span><br>
+<span style="font-size:12px;color:#8b8b9e;">Handles rush without stress</span>
+</td>
+</tr>
+</table>
+</td>
+</tr>
+
+</table>
 </td>
 </tr>
 
 <!-- CTA Button -->
 <tr>
-<td align="center" style="padding-top:30px;">
-
+<td align="center" style="padding:32px 40px 0 40px;">
 <table cellpadding="0" cellspacing="0">
 <tr>
-<td bgcolor="#4f46e5" style="border-radius:8px;padding:18px 40px;">
+<td bgcolor="#4f46e5" style="border-radius:10px;padding:16px 44px;box-shadow:0 4px 14px rgba(79,70,229,0.35);">
 <a href="{{ calendar_link }}"
-style="font-size:18px;font-weight:700;color:#ffffff;text-decoration:none;display:inline-block;">
-📞 Book Your Demo Call
+style="font-size:16px;font-weight:700;color:#ffffff;text-decoration:none;display:inline-block;letter-spacing:0.3px;">
+📞&nbsp;&nbsp;Book a Free Demo Call
 </a>
 </td>
 </tr>
 </table>
-
+<p style="margin:12px 0 0 0;font-size:12px;color:#a0a3b1;">Takes 2 minutes · No commitment</p>
 </td>
 </tr>
 
 <!-- Closing -->
 <tr>
-<td style="padding-top:25px;font-size:14px;color:#555;">
-Happy to show you how this would work for <strong>{{ business_name }}</strong>.
+<td style="padding:28px 40px 0 40px;font-size:14px;color:#52525e;line-height:1.7;">
+Happy to show you how this would work for <strong style="color:#2d2d3a;">{{ business_name }}</strong>. Just pick a time above, or reply to this email.
 </td>
 </tr>
 
 <!-- Signature -->
 <tr>
-<td style="padding-top:25px;font-size:14px;color:#444;">
-Best regards,<br><br>
-<strong>{{ sender_name }}</strong><br>
-{{ sender_company }}<br>
-{{ sender_phone }}<br>
-<a href="{{ sender_website }}" style="color:#4f46e5;text-decoration:none;">{{ sender_website }}</a>
+<td style="padding:28px 40px 0 40px;">
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr>
+<td style="border-top:1px solid #eef0f4;padding-top:24px;">
+<span style="font-size:15px;font-weight:700;color:#1a1a2e;">{{ sender_name }}</span><br>
+<span style="font-size:13px;color:#8b8b9e;">{{ sender_company }}</span><br>
+<span style="font-size:13px;color:#8b8b9e;">{{ sender_phone }}</span><br>
+<a href="{{ sender_website }}" style="font-size:13px;color:#4f46e5;text-decoration:none;">{{ sender_website }}</a>
+</td>
+</tr>
+</table>
 </td>
 </tr>
 
 <!-- PS -->
 <tr>
-<td style="padding-top:18px;font-size:12px;color:#888;">
-PS: The assistant can even call missed numbers back automatically.
+<td style="padding:24px 40px 36px 40px;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fffbeb;border-radius:8px;border:1px solid #fef3c7;">
+<tr>
+<td style="padding:12px 16px;font-size:12px;color:#92400e;">
+💡 <strong>Fun fact:</strong> The assistant can even call back missed numbers automatically — so you recover lost customers.
+</td>
+</tr>
+</table>
 </td>
 </tr>
 
