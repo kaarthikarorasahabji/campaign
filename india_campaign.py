@@ -1,0 +1,300 @@
+"""
+India-scale cold email campaign.
+Scrapes Google Maps across ALL Indian cities/categories,
+finds emails, sends personalized cold emails via Gmail.
+Never sends to the same lead twice. Tracks scraped queries.
+"""
+import asyncio
+import logging
+import yaml
+import time
+import random
+import os
+import sys
+from database.db import (
+    init_db, insert_lead, get_unsent_leads, sync_gmail_accounts,
+    record_email_sent, increment_sent_count, get_connection,
+    reset_daily_counts, get_email_stats, mark_query_scraped,
+    is_query_scraped, get_total_unsent_count,
+)
+from scraper.google_maps_scraper import scrape_google_maps, search_email_for_business
+from scraper.website_email_scraper import scrape_email_from_website
+from scraper.lead_filter import is_valid_email_format
+from scraper.query_generator import generate_all_queries, get_unscraped_queries
+from emailer.gmail_sender import send_email, pick_gmail_account
+from emailer.tracker import print_report
+from jinja2 import Template
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+CONFIG_DIR = os.path.join(os.path.dirname(__file__), "config")
+
+FRANCHISE_KEYWORDS = [
+    "mcdonald", "kfc", "domino", "pizza hut", "subway", "burger king",
+    "starbucks", "dunkin", "wendy", "taco bell", "papa john", "haldiram",
+    "barbeque nation", "biryani blues", "wow momo", "chaayos",
+]
+
+
+def is_franchise(name):
+    return any(k in (name or "").lower() for k in FRANCHISE_KEYWORDS)
+
+
+def load_config():
+    with open(os.path.join(CONFIG_DIR, "settings.yaml")) as f:
+        return yaml.safe_load(f)
+
+
+def load_template():
+    """Load the India email template."""
+    path = os.path.join(CONFIG_DIR, "email_templates", "template_india.html")
+    if os.path.exists(path):
+        with open(path) as f:
+            return f.read()
+    # Fallback to restaurant template
+    path = os.path.join(CONFIG_DIR, "email_templates", "template_restaurant.html")
+    with open(path) as f:
+        return f.read()
+
+
+async def scrape_phase(config, max_queries=50):
+    """
+    Scrape Google Maps for business leads across India.
+    Only runs queries that haven't been scraped before.
+    """
+    # Generate all queries from config
+    categories = config.get("target_categories", None)
+    all_queries = generate_all_queries(categories=categories)
+
+    # Filter to only unscraped queries
+    unscraped = get_unscraped_queries(all_queries)
+
+    if not unscraped:
+        logger.info("All queries have been scraped! No new queries to run.")
+        return 0
+
+    # Limit per run to avoid extremely long sessions
+    batch = unscraped[:max_queries]
+    logger.info(f"\nScraping {len(batch)} queries (of {len(unscraped)} remaining)...")
+
+    scraper_settings = config.get("scraper_settings", {})
+    min_delay = scraper_settings.get("min_delay_seconds", 2)
+    max_delay = scraper_settings.get("max_delay_seconds", 5)
+    max_results = scraper_settings.get("max_results_per_query", 15)
+
+    total = 0
+    for i, (query, city, country) in enumerate(batch, 1):
+        logger.info(f"\n[{i}/{len(batch)}] Scraping: {query}")
+
+        try:
+            results = await scrape_google_maps(
+                query, max_results=max_results, headless=True,
+                min_delay=min_delay, max_delay=max_delay,
+            )
+        except Exception as e:
+            logger.error(f"Scrape failed for '{query}': {e}")
+            mark_query_scraped(query, city, country, 0)
+            continue
+
+        saved = 0
+        for r in results:
+            if is_franchise(r.get("business_name")):
+                continue
+
+            # Try to find email from website
+            if not r.get("email") and r.get("website_url") and r.get("has_website"):
+                logger.info(f"  Checking website for {r['business_name']}...")
+                try:
+                    email = await scrape_email_from_website(r["website_url"], headless=True)
+                    if email and is_valid_email_format(email):
+                        r["email"] = email
+                        logger.info(f"  Found: {email}")
+                except Exception as e:
+                    logger.debug(f"  Website scrape error: {e}")
+
+            # Try Google search for email
+            if not r.get("email"):
+                logger.info(f"  Google searching email for {r['business_name']}...")
+                try:
+                    email = await search_email_for_business(r["business_name"], city, headless=True)
+                    if email and is_valid_email_format(email):
+                        r["email"] = email
+                        logger.info(f"  Found: {email}")
+                except Exception as e:
+                    logger.debug(f"  Email search error: {e}")
+
+            insert_lead(
+                business_name=r.get("business_name", ""),
+                category=r.get("category") or query.split(" in ")[0],
+                phone=r.get("phone"),
+                email=r.get("email"),
+                location=r.get("location") or f"{city}, {country}",
+                country=country,
+                has_website=r.get("has_website", False),
+                website_url=r.get("website_url"),
+            )
+            saved += 1
+
+        # Mark this query as done
+        mark_query_scraped(query, city, country, saved)
+        total += saved
+        logger.info(f"  Saved {saved} leads from '{query}'. Total this run: {total}")
+
+        # Brief pause between queries
+        await asyncio.sleep(random.uniform(1, 3))
+
+    return total
+
+
+def send_phase(config):
+    """Send cold emails to all unsent leads with email addresses."""
+    template_html = load_template()
+    sender_info = config.get("sender", {})
+    warmup_schedule = config.get("warmup_schedule", {999: 100})
+    email_settings = config.get("email_settings", {})
+    daily_target = email_settings.get("daily_total_target", 100)
+    min_delay = email_settings.get("min_delay_seconds", 15)
+    max_delay = email_settings.get("max_delay_seconds", 45)
+
+    reset_daily_counts()
+
+    # Get unsent leads with emails
+    leads = get_unsent_leads(limit=daily_target)
+    if not leads:
+        logger.info("No unsent leads with emails available.")
+        return 0
+
+    logger.info(f"\nSending emails to {len(leads)} leads...")
+    template = Template(template_html)
+    sent = 0
+    failed = 0
+
+    subject_templates = [
+        "Never miss a phone order again, {name}",
+        "{name} — your AI receptionist is ready",
+        "Stop missing calls at {name}",
+        "AI assistant for {name} — free demo",
+    ]
+
+    for lead in leads:
+        # Pick Gmail account
+        account = pick_gmail_account(warmup_schedule)
+        if not account:
+            logger.warning("All accounts at daily limit. Stopping.")
+            break
+
+        # Render email
+        city = lead["location"] or "your area"
+        if "," in city:
+            city = city.split(",")[0].strip()
+
+        html_body = template.render(
+            business_name=lead["business_name"],
+            category=lead["category"] or "business",
+            city=city,
+            sender_name=sender_info.get("name", ""),
+            sender_company=sender_info.get("company", ""),
+            sender_phone=sender_info.get("phone", ""),
+            sender_website=sender_info.get("website", ""),
+            calendar_link=sender_info.get("calendar_link", ""),
+        )
+
+        subject = random.choice(subject_templates).format(name=lead["business_name"])
+
+        success = send_email(lead["email"], subject, html_body, account)
+        status = "sent" if success else "bounced"
+        record_email_sent(lead["id"], account["email"], "india_cold", status)
+        increment_sent_count(account["email"])
+
+        if success:
+            sent += 1
+            logger.info(f"  [{sent}] Sent to {lead['email']} ({lead['business_name']})")
+        else:
+            failed += 1
+            logger.warning(f"  Failed: {lead['email']} ({lead['business_name']})")
+
+        # Delay between sends
+        delay = random.uniform(min_delay, max_delay)
+        time.sleep(delay)
+
+    logger.info(f"\nDone! Sent: {sent}, Failed: {failed}")
+    return sent
+
+
+async def run_full_cycle(config, max_queries=50):
+    """Run a complete scrape + send cycle."""
+    print("\n" + "=" * 60)
+    print("  AXENORA AI — INDIA-SCALE EMAIL CAMPAIGN")
+    print("=" * 60)
+
+    stats = get_email_stats()
+    print(f"\n  DB Status: {stats['total_leads']} leads, "
+          f"{stats['leads_with_email']} with email, "
+          f"{stats['pending']} pending, "
+          f"{stats.get('queries_scraped', 0)} queries done")
+
+    # Phase 1: Scrape
+    print(f"\n[PHASE 1] Scraping Google Maps (up to {max_queries} queries)...")
+    scraped = await scrape_phase(config, max_queries=max_queries)
+    print(f"\nScraped {scraped} new leads.")
+
+    # Phase 2: Send
+    unsent = get_total_unsent_count()
+    print(f"\n[PHASE 2] Sending emails ({unsent} pending)...")
+    sent = send_phase(config)
+
+    # Report
+    print_report()
+    stats = get_email_stats()
+    print(f"\n  Queries scraped so far: {stats.get('queries_scraped', 0)}")
+    print(f"  Remaining unsent leads: {stats['pending']}")
+
+    return {"scraped": scraped, "sent": sent}
+
+
+async def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="India-Scale Cold Email Campaign")
+    parser.add_argument("--scrape-only", action="store_true", help="Only scrape, don't send")
+    parser.add_argument("--send-only", action="store_true", help="Only send, don't scrape")
+    parser.add_argument("--report", action="store_true", help="Show stats only")
+    parser.add_argument("--max-queries", type=int, default=50, help="Max queries per scrape run")
+    parser.add_argument("--dry-run", action="store_true", help="Scrape but don't send")
+    args = parser.parse_args()
+
+    config = load_config()
+    init_db()
+    sync_gmail_accounts(config.get("gmail_accounts", []))
+
+    if args.report:
+        print_report()
+        stats = get_email_stats()
+        all_queries = generate_all_queries(config.get("target_categories"))
+        unscraped = get_unscraped_queries(all_queries)
+        print(f"  Total possible queries:  {len(all_queries)}")
+        print(f"  Queries scraped:         {stats.get('queries_scraped', 0)}")
+        print(f"  Queries remaining:       {len(unscraped)}")
+        return
+
+    if args.scrape_only:
+        await scrape_phase(config, max_queries=args.max_queries)
+        print_report()
+        return
+
+    if args.send_only:
+        send_phase(config)
+        print_report()
+        return
+
+    if args.dry_run:
+        await scrape_phase(config, max_queries=args.max_queries)
+        print("\n[DRY RUN] Skipping send phase.")
+        print_report()
+        return
+
+    await run_full_cycle(config, max_queries=args.max_queries)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
