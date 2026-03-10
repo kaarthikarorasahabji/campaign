@@ -98,8 +98,15 @@ def load_config():
     return config
 
 
-def load_template(country):
-    """Load the right template based on country."""
+def load_template(country, has_website=True):
+    """Load the right template based on country and website status."""
+    # Businesses without a website get a different pitch
+    if not has_website:
+        path = os.path.join(CONFIG_DIR, "email_templates", "template_no_website.html")
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+
     if country and country.lower() == "india":
         path = os.path.join(CONFIG_DIR, "email_templates", "template_india.html")
     else:
@@ -113,6 +120,7 @@ def load_template(country):
     fallback = os.path.join(CONFIG_DIR, "email_templates", "template_restaurant.html")
     with open(fallback, encoding="utf-8") as f:
         return f.read()
+
 
 
 async def scrape_phase(config, max_queries=50):
@@ -229,15 +237,23 @@ def send_phase(config):
     logger.info(f"\nSending emails to {len(leads)} leads...")
     logger.info(f"  Email method: {email_method} (Resend available: {has_resend})")
 
-    # Pre-load templates
-    india_template = Template(load_template("India"))
-    intl_template = Template(load_template("International"))
+    # Pre-load templates (with and without website variants)
+    india_template = Template(load_template("India", has_website=True))
+    intl_template = Template(load_template("International", has_website=True))
+    no_website_template = Template(load_template("India", has_website=False))
 
     subject_templates = [
         "Never miss a phone order again, {name}",
         "{name} — your AI receptionist is ready",
         "Stop missing calls at {name}",
         "AI assistant for {name} — free demo",
+    ]
+
+    no_website_subjects = [
+        "{name} — you're losing customers without a website",
+        "Get {name} online this week (free consultation)",
+        "{name}: your competitors are online, are you?",
+        "Website + AI assistant for {name} — free audit",
     ]
 
     sent = 0
@@ -249,9 +265,15 @@ def send_phase(config):
     for lead in leads:
         country = lead["country"] or ""
         is_india = country.lower() == "india"
+        has_website = bool(lead.get("has_website"))
 
-        # Pick the right template
-        template = india_template if is_india else intl_template
+        # Pick the right template based on website status
+        if not has_website:
+            template = no_website_template
+            subject = random.choice(no_website_subjects).format(name=lead["business_name"])
+        else:
+            template = india_template if is_india else intl_template
+            subject = random.choice(subject_templates).format(name=lead["business_name"])
 
         # Render email
         city = lead["location"] or "your area"
@@ -269,7 +291,6 @@ def send_phase(config):
             calendar_link=sender_info.get("calendar_link", ""),
         )
 
-        subject = random.choice(subject_templates).format(name=lead["business_name"])
 
         success = False
         sender_id = ""

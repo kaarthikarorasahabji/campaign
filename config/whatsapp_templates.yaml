@@ -1,0 +1,56 @@
+# WhatsApp Cold Message Templates
+# Used for businesses without email — send via WhatsApp to their phone number
+# Variables: {business_name}, {category}, {city}, {sender_name}, {sender_phone}, {calendar_link}
+
+# --- Template 1: Short & Direct ---
+short_intro: |
+  Hi! 👋 I found *{business_name}* on Google Maps — great {category} in {city}!
+
+  I noticed you don't have a website yet. We help businesses like yours get online and attract more customers with:
+
+  🌐 Professional website
+  🤖 AI call assistant (never miss a call)
+  📲 WhatsApp auto-reply bot
+
+  Want a free consultation? Book here: {calendar_link}
+
+  — {sender_name}, Axenora AI
+  📞 {sender_phone}
+
+# --- Template 2: Problem-Focused ---
+problem_focused: |
+  Hi *{business_name}* 👋
+
+  Quick question — when customers search for "{category} in {city}" on Google, do they find you easily?
+
+  78% of people check online before visiting. Without a website, you might be losing customers to competitors who are online.
+
+  We can fix that in under a week:
+  ✅ Website + Google ranking
+  ✅ AI receptionist for missed calls
+  ✅ WhatsApp chatbot
+
+  Interested? Let's chat: {calendar_link}
+
+  {sender_name} | Axenora AI
+
+# --- Template 3: Casual & Friendly ---
+casual_friendly: |
+  Hey! 😊 Came across *{business_name}* — looks like a great place!
+
+  Just wanted to reach out because we help {category} businesses in {city} get more customers through AI and digital tools.
+
+  Would you be open to a quick 5-min chat about how we could help? No pressure at all.
+
+  {sender_name}
+  {sender_phone}
+
+# --- Follow-up Template (send 2-3 days later) ---
+followup: |
+  Hi again! 👋 Just following up on my earlier message about helping *{business_name}* get online.
+
+  We recently helped a {category} in {city} increase their bookings by 40% with a website + AI assistant.
+
+  Happy to share details if you're interested! Just reply or call me at {sender_phone}.
+
+  {sender_name} | Axenora AI
