@@ -1,96 +1,91 @@
 """
-Server-mode scheduler for India-scale email campaign.
-Runs on Railway (or any server) as a long-running process.
-Executes scrape+send cycles on a daily schedule.
+Lightweight scheduler for Railway free tier.
+Runs one cycle per day, then sleeps — uses minimal compute hours.
 """
 import asyncio
 import logging
-from apscheduler.schedulers.blocking import BlockingScheduler
-from india_campaign import load_config, run_full_cycle, send_phase, scrape_phase
-from database.db import init_db, sync_gmail_accounts, reset_daily_counts
-from emailer.warmup import advance_warmup
-from emailer.tracker import print_report
+import time
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 
-def init():
-    """Initialize DB and sync accounts."""
+def already_ran_today():
+    """Check if we already sent emails today."""
+    from database.db import get_connection
+    conn = get_connection()
+    today = datetime.now().strftime("%Y-%m-%d")
+    count = conn.execute(
+        "SELECT COUNT(*) FROM emails_sent WHERE date(sent_at) = ?", (today,)
+    ).fetchone()[0]
+    conn.close()
+    return count > 0
+
+
+def run_daily_cycle():
+    """Run one scrape + send cycle."""
+    from india_campaign import load_config, run_full_cycle, send_phase
+    from database.db import init_db, sync_gmail_accounts, reset_daily_counts
+    from emailer.warmup import advance_warmup
+    from emailer.tracker import print_report
+
     config = load_config()
     init_db()
     sync_gmail_accounts(config.get("gmail_accounts", []))
-    return config
-
-
-def morning_cycle():
-    """9 AM: Full scrape + send cycle (50 queries per run)."""
-    logger.info("=== MORNING CYCLE: Scrape + Send ===")
-    config = init()
     reset_daily_counts()
-    asyncio.run(run_full_cycle(config, max_queries=50))
 
+    # Run the full cycle with limited queries to save compute
+    asyncio.run(run_full_cycle(config, max_queries=10))
 
-def midday_send():
-    """1 PM: Send-only pass to hit daily targets."""
-    logger.info("=== MIDDAY SEND ===")
-    config = init()
-    sent = send_phase(config)
-    logger.info(f"Midday send: {sent} emails sent")
-    print_report()
-
-
-def afternoon_scrape():
-    """4 PM: Extra scrape run to build up the lead pipeline."""
-    logger.info("=== AFTERNOON SCRAPE ===")
-    config = init()
-    asyncio.run(scrape_phase(config, max_queries=30))
-    print_report()
-
-
-def end_of_day():
-    """7 PM: Advance warmup + daily report."""
-    logger.info("=== END OF DAY ===")
     advance_warmup()
     print_report()
 
 
-def start_scheduler():
-    """Start the APScheduler with IST-timed jobs."""
-    # Run init once at startup
-    config = init()
-    logger.info("Server started. Running initial cycle...")
-
-    # Run one cycle immediately on startup
-    reset_daily_counts()
+def seconds_until_9am():
+    """Calculate seconds until next 9 AM IST."""
     try:
-        asyncio.run(run_full_cycle(config, max_queries=30))
-    except Exception as e:
-        logger.error(f"Initial cycle failed: {e}")
+        import pytz
+        ist = pytz.timezone("Asia/Kolkata")
+        now = datetime.now(ist)
+    except ImportError:
+        # Fallback: assume server is in IST
+        now = datetime.now()
 
-    scheduler = BlockingScheduler(timezone="Asia/Kolkata")
+    tomorrow_9am = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    if now.hour >= 9:
+        tomorrow_9am += timedelta(days=1)
 
-    # Morning: full cycle
-    scheduler.add_job(morning_cycle, "cron", hour=9, minute=0, id="morning_cycle")
+    diff = (tomorrow_9am - now).total_seconds()
+    return max(diff, 60)  # At least 60 seconds
 
-    # Midday: send only
-    scheduler.add_job(midday_send, "cron", hour=13, minute=0, id="midday_send")
 
-    # Afternoon: extra scrape
-    scheduler.add_job(afternoon_scrape, "cron", hour=16, minute=0, id="afternoon_scrape")
+def main():
+    logger.info("=" * 50)
+    logger.info("  AXENORA AI — Railway Free Tier Scheduler")
+    logger.info("  Mode: 1 cycle/day, 50 emails max")
+    logger.info("=" * 50)
 
-    # End of day: warmup + report
-    scheduler.add_job(end_of_day, "cron", hour=19, minute=0, id="end_of_day")
+    while True:
+        if already_ran_today():
+            wait = seconds_until_9am()
+            hours = wait / 3600
+            logger.info(f"Already ran today. Sleeping {hours:.1f} hours until next 9 AM...")
+            time.sleep(wait)
+            continue
 
-    logger.info("\nScheduler started with jobs:")
-    for job in scheduler.get_jobs():
-        logger.info(f"  {job.id}: {job.trigger}")
+        logger.info("Starting daily cycle...")
+        try:
+            run_daily_cycle()
+        except Exception as e:
+            logger.error(f"Cycle failed: {e}")
 
-    try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Scheduler stopped.")
+        # Sleep until tomorrow 9 AM
+        wait = seconds_until_9am()
+        hours = wait / 3600
+        logger.info(f"Cycle complete. Sleeping {hours:.1f} hours until next run...")
+        time.sleep(wait)
 
 
 if __name__ == "__main__":
-    start_scheduler()
+    main()
