@@ -262,7 +262,10 @@ def send_phase(config):
     for lead in leads:
         country = lead["country"] or ""
         is_india = country.lower() == "india"
-        has_website = bool(lead.get("has_website"))
+        try:
+            has_website = bool(lead["has_website"])
+        except (IndexError, KeyError):
+            has_website = False
 
         # Pick the right template based on website status
         if not has_website:
