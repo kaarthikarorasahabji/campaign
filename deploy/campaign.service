@@ -1,0 +1,25 @@
+[Unit]
+Description=Axenora AI Campaign - 24/7 Email Scraper & Sender
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/campaign
+Environment=PATH=/home/ubuntu/campaign/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=EMAIL_METHOD=gmail
+ExecStart=/home/ubuntu/campaign/venv/bin/python scheduler.py
+Restart=always
+RestartSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=campaign
+
+# Resource limits (generous for Playwright)
+MemoryMax=4G
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target
