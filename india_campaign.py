@@ -60,7 +60,7 @@ def load_config():
     ])
     config.setdefault("email_settings", {
         "min_delay_seconds": 20, "max_delay_seconds": 60,
-        "daily_total_target": 200,
+        "daily_total_target": 100,
     })
     config.setdefault("scraper_settings", {
         "min_delay_seconds": 2, "max_delay_seconds": 5,
