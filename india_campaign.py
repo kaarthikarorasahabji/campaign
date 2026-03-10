@@ -135,7 +135,7 @@ async def scrape_phase(config, max_queries=50):
     scraper_settings = config.get("scraper_settings", {})
     min_delay = scraper_settings.get("min_delay_seconds", 2)
     max_delay = scraper_settings.get("max_delay_seconds", 5)
-    max_results = scraper_settings.get("max_results_per_query", 15)
+    max_results = scraper_settings.get("max_results_per_query", 10)
 
     total = 0
     for i, (query, city, country) in enumerate(batch, 1):

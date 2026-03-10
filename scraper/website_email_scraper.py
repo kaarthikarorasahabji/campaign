@@ -8,6 +8,16 @@ from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 
+CHROMIUM_ARGS = [
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--no-sandbox",
+    "--single-process",
+    "--disable-setuid-sandbox",
+    "--js-flags=--max-old-space-size=128",
+]
+
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 BLACKLIST = {"google", "gstatic", "example", "schema", "sentry", "w3.org", "wix", "squarespace", "wordpress", "facebook", "instagram", "twitter"}
 
@@ -40,7 +50,7 @@ async def scrape_email_from_website(website_url, headless=True):
     found_emails = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
+        browser = await p.chromium.launch(headless=headless, args=CHROMIUM_ARGS)
         page = await browser.new_page()
         page.set_default_timeout(10000)
 

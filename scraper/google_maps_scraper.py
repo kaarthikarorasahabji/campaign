@@ -7,6 +7,16 @@ from playwright.async_api import async_playwright
 
 logger = logging.getLogger(__name__)
 
+CHROMIUM_ARGS = [
+    "--disable-gpu",
+    "--disable-dev-shm-usage",
+    "--disable-extensions",
+    "--no-sandbox",
+    "--single-process",
+    "--disable-setuid-sandbox",
+    "--js-flags=--max-old-space-size=128",
+]
+
 
 async def scrape_google_maps(query, max_results=20, headless=True, min_delay=3, max_delay=8):
     """
@@ -15,7 +25,7 @@ async def scrape_google_maps(query, max_results=20, headless=True, min_delay=3, 
     """
     results = []
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
+        browser = await p.chromium.launch(headless=headless, args=CHROMIUM_ARGS)
         page = await browser.new_page()
         try:
             url = f"https://www.google.com/maps/search/{quote_plus(query)}"
@@ -165,7 +175,7 @@ async def _extract_business_info(page, name_from_listing=None):
 async def search_email_for_business(business_name, location, headless=True):
     """Search Google for a business's email when not listed on Maps."""
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless)
+        browser = await p.chromium.launch(headless=headless, args=CHROMIUM_ARGS)
         page = await browser.new_page()
         try:
             query = f'{business_name} {location} email contact'
