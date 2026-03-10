@@ -40,7 +40,15 @@ def run_daily_cycle():
     reset_daily_counts()
 
     # Run the full cycle with limited queries to save compute
-    asyncio.run(run_full_cycle(config, max_queries=10))
+    try:
+        asyncio.run(run_full_cycle(config, max_queries=5))
+    except Exception as e:
+        logger.error(f"Full cycle error: {e}")
+        # Still try to send any leads we have
+        try:
+            send_phase(config)
+        except Exception as se:
+            logger.error(f"Fallback send failed: {se}")
 
     advance_warmup()
     print_report()

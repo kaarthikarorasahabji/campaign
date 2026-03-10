@@ -332,8 +332,12 @@ async def run_full_cycle(config, max_queries=50):
 
     # Phase 1: Scrape
     print(f"\n[PHASE 1] Scraping Google Maps (up to {max_queries} queries)...")
-    scraped = await scrape_phase(config, max_queries=max_queries)
-    print(f"\nScraped {scraped} new leads.")
+    scraped = 0
+    try:
+        scraped = await scrape_phase(config, max_queries=max_queries)
+        print(f"\nScraped {scraped} new leads.")
+    except Exception as e:
+        print(f"\nScrape phase failed: {e} — proceeding to send phase with existing leads.")
 
     # Phase 2: Send
     unsent = get_total_unsent_count()
