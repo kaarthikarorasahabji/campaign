@@ -13,12 +13,16 @@ logger = logging.getLogger(__name__)
 
 def already_ran_today():
     """Check if we already sent emails today."""
+    import sqlite3
     from database.db import get_connection
     conn = get_connection()
     today = datetime.now().strftime("%Y-%m-%d")
-    count = conn.execute(
-        "SELECT COUNT(*) FROM emails_sent WHERE date(sent_at) = ?", (today,)
-    ).fetchone()[0]
+    try:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM emails_sent WHERE date(sent_at) = ?", (today,)
+        ).fetchone()[0]
+    except sqlite3.OperationalError:
+        count = 0
     conn.close()
     return count > 0
 
