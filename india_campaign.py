@@ -24,6 +24,7 @@ from scraper.query_generator import generate_all_queries, get_unscraped_queries
 from emailer.gmail_sender import send_email, pick_gmail_account
 from emailer.resend_sender import send_via_resend
 from emailer.tracker import print_report
+from emailer.whatsapp_sender import send_cold_whatsapp
 from jinja2 import Template
 
 import sys
@@ -352,6 +353,64 @@ def send_phase(config):
     return sent
 
 
+def whatsapp_phase(config):
+    """
+    Send WhatsApp messages to leads that have phone numbers but no email.
+    These are typically businesses without websites.
+    """
+    from database.db import get_db_connection
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Get leads with phone but no email AND not yet contacted via WhatsApp
+    cursor.execute("""
+        SELECT id, business_name, category, phone, location, country, has_website
+        FROM leads
+        WHERE phone IS NOT NULL AND phone != ''
+          AND (email IS NULL OR email = '')
+          AND whatsapp_sent = 0
+        ORDER BY created_at DESC
+        LIMIT 20
+    """)
+    leads = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+
+    if not leads:
+        logger.info("[PHASE 3] No phone-only leads for WhatsApp.")
+        return 0
+
+    logger.info(f"\n[PHASE 3] Sending WhatsApp to {len(leads)} phone-only leads...")
+
+    email_settings = config.get("email_settings", {})
+    min_delay = email_settings.get("min_delay_seconds", 15)
+    max_delay = email_settings.get("max_delay_seconds", 45)
+
+    sent = 0
+    failed = 0
+
+    for lead in leads:
+        result = send_cold_whatsapp(lead, config)
+
+        # Mark in DB
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        status = 1 if result.get("success") else -1
+        cursor.execute("UPDATE leads SET whatsapp_sent = ? WHERE id = ?", (status, lead["id"]))
+        conn.commit()
+        conn.close()
+
+        if result.get("success"):
+            sent += 1
+        else:
+            failed += 1
+
+        time.sleep(random.uniform(min_delay, max_delay))
+
+    logger.info(f"\n📲 WhatsApp done! Sent: {sent}, Failed: {failed}")
+    return sent
+
+
 async def run_full_cycle(config, max_queries=50):
     """Run a complete scrape + send cycle."""
     print("\n" + "=" * 60)
@@ -373,10 +432,17 @@ async def run_full_cycle(config, max_queries=50):
     except Exception as e:
         print(f"\nScrape phase failed: {e} — proceeding to send phase with existing leads.")
 
-    # Phase 2: Send
+    # Phase 2: Send emails
     unsent = get_total_unsent_count()
     print(f"\n[PHASE 2] Sending emails ({unsent} pending)...")
     sent = send_phase(config)
+
+    # Phase 3: WhatsApp for leads with phone but no email
+    wa_sent = 0
+    try:
+        wa_sent = whatsapp_phase(config)
+    except Exception as e:
+        logger.warning(f"WhatsApp phase error: {e}")
 
     # Report
     print_report()
@@ -384,7 +450,7 @@ async def run_full_cycle(config, max_queries=50):
     print(f"\n  Queries scraped so far: {stats.get('queries_scraped', 0)}")
     print(f"  Remaining unsent leads: {stats['pending']}")
 
-    return {"scraped": scraped, "sent": sent}
+    return {"scraped": scraped, "sent": sent, "whatsapp": wa_sent}
 
 
 async def main():

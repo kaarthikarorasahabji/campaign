@@ -12,6 +12,9 @@ def get_connection():
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
+# Alias for external modules
+get_db_connection = get_connection
+
 
 def init_db():
     conn = get_connection()
@@ -26,6 +29,7 @@ def init_db():
             country TEXT,
             has_website INTEGER DEFAULT 0,
             website_url TEXT,
+            whatsapp_sent INTEGER DEFAULT 0,
             scraped_at TEXT DEFAULT (datetime('now')),
             UNIQUE(phone, email, business_name)
         );
