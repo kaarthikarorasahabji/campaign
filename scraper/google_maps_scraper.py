@@ -173,28 +173,25 @@ async def _extract_business_info(page, name_from_listing=None):
 
 
 async def search_email_for_business(business_name, location, headless=True):
-    """Search Google for a business's email when not listed on Maps."""
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=CHROMIUM_ARGS)
-        page = await browser.new_page()
-        try:
-            query = f'{business_name} {location} email contact'
-            await page.goto(f"https://www.google.com/search?q={quote_plus(query)}", timeout=15000)
-            await asyncio.sleep(random.uniform(2, 4))
-
-            content = await page.inner_text("body", timeout=5000)
+    """Search Google for a business's email using httpx (no browser needed)."""
+    import httpx
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    }
+    try:
+        query = f'{business_name} {location} email contact'
+        async with httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as client:
+            resp = await client.get(f"https://www.google.com/search?q={quote_plus(query)}")
+            content = resp.text
             emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", content)
-            # Filter out common false positives
             filtered = [
                 e for e in emails
                 if not any(x in e.lower() for x in ["google", "gstatic", "example", "schema", "sentry", "w3.org", "wix", "mailto"])
             ]
             return filtered[0] if filtered else None
-        except Exception as e:
-            logger.warning(f"Email search failed for {business_name}: {e}")
-            return None
-        finally:
-            await browser.close()
+    except Exception as e:
+        logger.warning(f"Email search failed for {business_name}: {e}")
+        return None
 
 
 if __name__ == "__main__":

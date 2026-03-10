@@ -1,25 +1,20 @@
-"""Scrape emails from business websites by visiting their contact/about pages."""
+"""Scrape emails from business websites using httpx (no browser needed)."""
 import asyncio
 import re
 import random
 import logging
+import httpx
 from urllib.parse import urljoin
-from playwright.async_api import async_playwright
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-CHROMIUM_ARGS = [
-    "--disable-gpu",
-    "--disable-dev-shm-usage",
-    "--disable-extensions",
-    "--no-sandbox",
-    "--single-process",
-    "--disable-setuid-sandbox",
-    "--js-flags=--max-old-space-size=128",
-]
-
 EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 BLACKLIST = {"google", "gstatic", "example", "schema", "sentry", "w3.org", "wix", "squarespace", "wordpress", "facebook", "instagram", "twitter"}
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+}
 
 
 def _filter_emails(emails):
@@ -38,71 +33,53 @@ def _filter_emails(emails):
     return result
 
 
+def _extract_emails_from_html(html):
+    """Extract emails from HTML text and mailto links."""
+    emails = EMAIL_REGEX.findall(html)
+    soup = BeautifulSoup(html, "html.parser")
+    for link in soup.find_all("a", href=True):
+        href = link["href"]
+        if href.startswith("mailto:"):
+            email = href.replace("mailto:", "").split("?")[0].strip()
+            emails.append(email)
+    return emails
+
+
 async def scrape_email_from_website(website_url, headless=True):
     """Visit a website and try to find email addresses on main page and contact page."""
     if not website_url:
         return None
 
-    # Clean URL
     if not website_url.startswith("http"):
         website_url = "https://" + website_url
 
     found_emails = []
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=headless, args=CHROMIUM_ARGS)
-        page = await browser.new_page()
-        page.set_default_timeout(10000)
-
+    async with httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True, verify=False) as client:
         try:
-            # Visit main page
-            await page.goto(website_url, wait_until="domcontentloaded", timeout=15000)
-            await asyncio.sleep(random.uniform(1, 2))
-
-            text = await page.inner_text("body", timeout=5000)
-            found_emails.extend(EMAIL_REGEX.findall(text))
-
-            # Also check href="mailto:" links
-            mailto_links = await page.locator('a[href^="mailto:"]').all()
-            for link in mailto_links:
-                try:
-                    href = await link.get_attribute("href", timeout=2000)
-                    if href:
-                        email = href.replace("mailto:", "").split("?")[0].strip()
-                        found_emails.append(email)
-                except Exception:
-                    pass
+            resp = await client.get(website_url)
+            html = resp.text
+            found_emails.extend(_extract_emails_from_html(html))
 
             # Try to find and visit contact page
-            contact_links = await page.locator('a:text-matches("contact|about|reach us|get in touch", "i")').all()
-            for link in contact_links[:2]:  # Visit max 2 contact-like pages
+            soup = BeautifulSoup(html, "html.parser")
+            contact_links = []
+            for link in soup.find_all("a", href=True):
+                text = (link.get_text() or "").lower()
+                href = link["href"].lower()
+                if any(k in text or k in href for k in ["contact", "about", "reach", "get-in-touch"]):
+                    contact_links.append(link["href"])
+
+            for href in contact_links[:2]:
                 try:
-                    href = await link.get_attribute("href", timeout=2000)
-                    if href and not href.startswith("mailto:") and not href.startswith("tel:"):
-                        contact_url = urljoin(website_url, href)
-                        await page.goto(contact_url, wait_until="domcontentloaded", timeout=10000)
-                        await asyncio.sleep(random.uniform(1, 2))
-
-                        text = await page.inner_text("body", timeout=5000)
-                        found_emails.extend(EMAIL_REGEX.findall(text))
-
-                        # Check mailto links on contact page too
-                        mailto_links = await page.locator('a[href^="mailto:"]').all()
-                        for ml in mailto_links:
-                            try:
-                                href = await ml.get_attribute("href", timeout=2000)
-                                if href:
-                                    email = href.replace("mailto:", "").split("?")[0].strip()
-                                    found_emails.append(email)
-                            except Exception:
-                                pass
+                    contact_url = urljoin(website_url, href)
+                    resp = await client.get(contact_url)
+                    found_emails.extend(_extract_emails_from_html(resp.text))
                 except Exception:
                     continue
 
         except Exception as e:
             logger.debug(f"Error scraping {website_url}: {e}")
-        finally:
-            await browser.close()
 
     filtered = _filter_emails(found_emails)
     return filtered[0] if filtered else None
