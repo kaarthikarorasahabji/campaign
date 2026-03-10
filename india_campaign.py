@@ -43,7 +43,7 @@ def is_franchise(name):
 
 
 def load_config():
-    with open(os.path.join(CONFIG_DIR, "settings.yaml")) as f:
+    with open(os.path.join(CONFIG_DIR, "settings.yaml"), encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -55,12 +55,12 @@ def load_template(country):
         path = os.path.join(CONFIG_DIR, "email_templates", "template_international.html")
 
     if os.path.exists(path):
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return f.read()
 
     # Fallback to restaurant template
     fallback = os.path.join(CONFIG_DIR, "email_templates", "template_restaurant.html")
-    with open(fallback) as f:
+    with open(fallback, encoding="utf-8") as f:
         return f.read()
 
 
