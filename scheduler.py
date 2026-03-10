@@ -1,34 +1,24 @@
 """
-Lightweight scheduler for Railway free tier.
-Runs one cycle per day, then sleeps — uses minimal compute hours.
+Continuous 24/7 scheduler for the email campaign.
+Runs scrape + send cycles back-to-back with a short cooldown between cycles.
 """
 import asyncio
 import logging
 import time
-from datetime import datetime, timedelta
+import traceback
 
 import sys
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
+# How many queries to scrape per cycle
+QUERIES_PER_CYCLE = 20
 
-def already_ran_today():
-    """Check if we already sent emails today."""
-    import sqlite3
-    from database.db import get_connection
-    conn = get_connection()
-    today = datetime.now().strftime("%Y-%m-%d")
-    try:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM emails_sent WHERE date(sent_at) = ?", (today,)
-        ).fetchone()[0]
-    except sqlite3.OperationalError:
-        count = 0
-    conn.close()
-    return count > 0
+# Cooldown between cycles (seconds) — prevents hammering Google Maps
+CYCLE_COOLDOWN = 300  # 5 minutes
 
 
-def run_daily_cycle():
+def run_cycle():
     """Run one scrape + send cycle."""
     from india_campaign import load_config, run_full_cycle, send_phase
     from database.db import init_db, sync_gmail_accounts, reset_daily_counts
@@ -40,64 +30,54 @@ def run_daily_cycle():
     sync_gmail_accounts(config.get("gmail_accounts", []))
     reset_daily_counts()
 
-    # Run the full cycle with limited queries to save compute
+    # Run the full scrape + send cycle
     try:
-        asyncio.run(run_full_cycle(config, max_queries=5))
+        result = asyncio.run(run_full_cycle(config, max_queries=QUERIES_PER_CYCLE))
+        logger.info(f"Cycle result: scraped={result.get('scraped', 0)}, sent={result.get('sent', 0)}")
     except Exception as e:
         logger.error(f"Full cycle error: {e}")
-        # Still try to send any leads we have
+        logger.error(traceback.format_exc())
+        # Still try to send any leads we already have
         try:
-            send_phase(config)
+            logger.info("Attempting fallback send phase with existing leads...")
+            sent = send_phase(config)
+            logger.info(f"Fallback send phase sent {sent} emails")
         except Exception as se:
-            logger.error(f"Fallback send failed: {se}")
+            logger.error(f"Fallback send also failed: {se}")
 
-    advance_warmup()
-    print_report()
-
-
-def seconds_until_9am():
-    """Calculate seconds until next 9 AM IST."""
     try:
-        import pytz
-        ist = pytz.timezone("Asia/Kolkata")
-        now = datetime.now(ist)
-    except ImportError:
-        # Fallback: assume server is in IST
-        now = datetime.now()
+        advance_warmup()
+    except Exception:
+        pass
 
-    tomorrow_9am = now.replace(hour=9, minute=0, second=0, microsecond=0)
-    if now.hour >= 9:
-        tomorrow_9am += timedelta(days=1)
-
-    diff = (tomorrow_9am - now).total_seconds()
-    return max(diff, 60)  # At least 60 seconds
+    try:
+        print_report()
+    except Exception:
+        pass
 
 
 def main():
-    logger.info("=" * 50)
-    logger.info("  AXENORA AI — Railway Free Tier Scheduler")
-    logger.info("  Mode: 1 cycle/day, 50 emails max")
-    logger.info("=" * 50)
+    logger.info("=" * 60)
+    logger.info("  AXENORA AI — CONTINUOUS 24/7 CAMPAIGN")
+    logger.info(f"  Queries per cycle: {QUERIES_PER_CYCLE}")
+    logger.info(f"  Cooldown between cycles: {CYCLE_COOLDOWN}s")
+    logger.info("=" * 60)
 
+    cycle_num = 0
     while True:
-        if already_ran_today():
-            wait = seconds_until_9am()
-            hours = wait / 3600
-            logger.info(f"Already ran today. Sleeping {hours:.1f} hours until next 9 AM...")
-            time.sleep(wait)
-            continue
+        cycle_num += 1
+        logger.info(f"\n{'=' * 60}")
+        logger.info(f"  STARTING CYCLE #{cycle_num}")
+        logger.info(f"{'=' * 60}")
 
-        logger.info("Starting daily cycle...")
         try:
-            run_daily_cycle()
+            run_cycle()
         except Exception as e:
-            logger.error(f"Cycle failed: {e}")
+            logger.error(f"Cycle #{cycle_num} failed: {e}")
+            logger.error(traceback.format_exc())
 
-        # Sleep until tomorrow 9 AM
-        wait = seconds_until_9am()
-        hours = wait / 3600
-        logger.info(f"Cycle complete. Sleeping {hours:.1f} hours until next run...")
-        time.sleep(wait)
+        logger.info(f"\nCycle #{cycle_num} complete. Cooling down for {CYCLE_COOLDOWN}s before next cycle...")
+        time.sleep(CYCLE_COOLDOWN)
 
 
 if __name__ == "__main__":

@@ -60,7 +60,7 @@ def load_config():
     ])
     config.setdefault("email_settings", {
         "min_delay_seconds": 20, "max_delay_seconds": 60,
-        "daily_total_target": 50, "send_hours_start": 9, "send_hours_end": 19,
+        "daily_total_target": 200,
     })
     config.setdefault("scraper_settings", {
         "min_delay_seconds": 2, "max_delay_seconds": 5,
@@ -203,15 +203,21 @@ async def scrape_phase(config, max_queries=50):
 def send_phase(config):
     """
     Send cold emails to all unsent leads.
-    India -> Gmail SMTP | International -> Resend API.
+    Uses Resend API for ALL emails (Railway blocks SMTP port 587).
+    Falls back to Gmail SMTP only if Resend is not configured.
     """
     sender_info = config.get("sender", {})
     warmup_schedule = config.get("warmup_schedule", {999: 100})
     email_settings = config.get("email_settings", {})
     resend_config = config.get("resend", {})
-    daily_target = email_settings.get("daily_total_target", 100)
+    daily_target = email_settings.get("daily_total_target", 200)
     min_delay = email_settings.get("min_delay_seconds", 15)
     max_delay = email_settings.get("max_delay_seconds", 45)
+
+    # Check if Resend is available (required for Railway where SMTP is blocked)
+    use_resend = bool(resend_config.get("api_key"))
+    if not use_resend:
+        logger.warning("⚠️  Resend API key not configured! Gmail SMTP may be blocked on Railway.")
 
     reset_daily_counts()
 
@@ -221,6 +227,7 @@ def send_phase(config):
         return 0
 
     logger.info(f"\nSending emails to {len(leads)} leads...")
+    logger.info(f"  Method: {'Resend API (HTTPS)' if use_resend else 'Gmail SMTP'}")
 
     # Pre-load templates
     india_template = Template(load_template("India"))
@@ -235,7 +242,7 @@ def send_phase(config):
 
     sent = 0
     failed = 0
-    intl_sent_today = 0
+    resend_sent = 0
     resend_limit = resend_config.get("daily_limit", 200)
 
     for lead in leads:
@@ -263,42 +270,22 @@ def send_phase(config):
 
         subject = random.choice(subject_templates).format(name=lead["business_name"])
 
-        if is_india:
-            # Send via Gmail
+        # Primary: Use Resend API for all emails (works on Railway)
+        if use_resend and resend_sent < resend_limit:
+            success = send_via_resend(lead["email"], subject, html_body, resend_config)
+            sender_id = resend_config.get("from_email", "resend")
+            if success:
+                resend_sent += 1
+        else:
+            # Fallback: Gmail SMTP (only works locally, not on Railway)
             account = pick_gmail_account(warmup_schedule)
             if not account:
-                logger.warning("All Gmail accounts at daily limit.")
-                # Try Resend as fallback for remaining Indian leads
-                if intl_sent_today < resend_limit and resend_config.get("api_key"):
-                    success = send_via_resend(lead["email"], subject, html_body, resend_config)
-                    sender_id = resend_config.get("from_email", "resend")
-                else:
-                    continue
-            else:
-                success = send_email(lead["email"], subject, html_body, account)
-                sender_id = account["email"]
-                if success:
-                    increment_sent_count(account["email"])
-        else:
-            # International -> Resend API
-            if intl_sent_today >= resend_limit:
-                logger.warning(f"Resend daily limit ({resend_limit}) reached. Skipping international.")
-                continue
-
-            if not resend_config.get("api_key"):
-                # Fallback to Gmail for international if no Resend
-                account = pick_gmail_account(warmup_schedule)
-                if not account:
-                    continue
-                success = send_email(lead["email"], subject, html_body, account)
-                sender_id = account["email"]
-                if success:
-                    increment_sent_count(account["email"])
-            else:
-                success = send_via_resend(lead["email"], subject, html_body, resend_config)
-                sender_id = resend_config.get("from_email", "resend")
-                if success:
-                    intl_sent_today += 1
+                logger.warning("All Gmail accounts at daily limit and Resend limit reached.")
+                break
+            success = send_email(lead["email"], subject, html_body, account)
+            sender_id = account["email"]
+            if success:
+                increment_sent_count(account["email"])
 
         status = "sent" if success else "bounced"
         template_name = "india_cold" if is_india else "international_cold"
@@ -310,12 +297,12 @@ def send_phase(config):
             logger.info(f"  {tag} [{sent}] Sent to {lead['email']} ({lead['business_name']})")
         else:
             failed += 1
-            logger.warning(f"  Failed: {lead['email']} ({lead['business_name']})")
+            logger.warning(f"  ❌ Failed: {lead['email']} ({lead['business_name']})")
 
         delay = random.uniform(min_delay, max_delay)
         time.sleep(delay)
 
-    logger.info(f"\nDone! Sent: {sent} (Intl via Resend: {intl_sent_today}), Failed: {failed}")
+    logger.info(f"\n✅ Done! Sent: {sent} (via Resend: {resend_sent}), Failed: {failed}")
     return sent
 
 
