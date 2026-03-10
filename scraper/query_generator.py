@@ -1,5 +1,5 @@
 """
-Dynamic query generator for India-scale Google Maps scraping.
+Dynamic query generator for worldwide Google Maps scraping.
 Generates search queries from all configured cities × categories,
 and tracks which queries have already been scraped to avoid duplicates.
 """
@@ -57,6 +57,76 @@ INDIA_CITIES = {
     "Chhattisgarh": ["Raipur", "Bilaspur"],
 }
 
+# International cities by country
+INTERNATIONAL_CITIES = {
+    "USA": [
+        "New York", "Los Angeles", "Chicago", "Houston", "Phoenix",
+        "San Antonio", "San Diego", "Dallas", "Austin", "San Jose",
+        "Miami", "Atlanta", "Denver", "Seattle", "Boston",
+        "Las Vegas", "Portland", "Nashville", "Orlando", "Tampa",
+        "Charlotte", "Minneapolis", "Raleigh", "Salt Lake City",
+        "San Francisco", "Brooklyn New York", "Manhattan New York",
+        "Scottsdale Arizona", "Plano Texas", "Irvine California",
+    ],
+    "UK": [
+        "London", "Manchester", "Birmingham", "Leeds", "Glasgow",
+        "Liverpool", "Edinburgh", "Bristol", "Sheffield", "Nottingham",
+        "Leicester", "Cardiff", "Brighton", "Oxford", "Cambridge",
+        "Reading", "Southampton", "Newcastle", "Belfast", "York",
+    ],
+    "Canada": [
+        "Toronto", "Vancouver", "Montreal", "Calgary", "Ottawa",
+        "Edmonton", "Winnipeg", "Quebec City", "Hamilton", "Halifax",
+        "Victoria", "Mississauga", "Brampton", "Surrey",
+    ],
+    "Australia": [
+        "Sydney", "Melbourne", "Brisbane", "Perth", "Adelaide",
+        "Gold Coast", "Canberra", "Hobart", "Darwin", "Cairns",
+        "Newcastle Australia", "Wollongong",
+    ],
+    "UAE": [
+        "Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Ras Al Khaimah",
+        "Fujairah", "Al Ain",
+    ],
+    "Singapore": ["Singapore"],
+    "New Zealand": ["Auckland", "Wellington", "Christchurch", "Hamilton New Zealand"],
+    "Ireland": ["Dublin", "Cork", "Galway", "Limerick"],
+    "South Africa": ["Johannesburg", "Cape Town", "Durban", "Pretoria"],
+    "Germany": ["Berlin", "Munich", "Hamburg", "Frankfurt", "Cologne",
+                "Stuttgart", "Dusseldorf"],
+    "Netherlands": ["Amsterdam", "Rotterdam", "The Hague", "Utrecht"],
+    "France": ["Paris", "Lyon", "Marseille", "Nice", "Toulouse", "Bordeaux"],
+    "Italy": ["Rome", "Milan", "Naples", "Turin", "Florence"],
+    "Spain": ["Madrid", "Barcelona", "Valencia", "Seville", "Malaga"],
+    "Saudi Arabia": ["Riyadh", "Jeddah", "Mecca", "Medina", "Dammam"],
+    "Qatar": ["Doha"],
+    "Bahrain": ["Manama"],
+    "Kuwait": ["Kuwait City"],
+    "Oman": ["Muscat"],
+    "Malaysia": ["Kuala Lumpur", "Penang", "Johor Bahru"],
+    "Thailand": ["Bangkok", "Chiang Mai", "Phuket", "Pattaya"],
+    "Philippines": ["Manila", "Cebu", "Davao"],
+    "Indonesia": ["Jakarta", "Bali", "Surabaya", "Bandung"],
+    "Japan": ["Tokyo", "Osaka", "Kyoto", "Yokohama", "Nagoya"],
+    "South Korea": ["Seoul", "Busan", "Incheon", "Daegu"],
+    "Hong Kong": ["Hong Kong"],
+    "Taiwan": ["Taipei", "Kaohsiung"],
+    "Vietnam": ["Ho Chi Minh City", "Hanoi", "Da Nang"],
+    "Mexico": ["Mexico City", "Cancun", "Guadalajara", "Monterrey"],
+    "Brazil": ["Sao Paulo", "Rio de Janeiro", "Brasilia", "Belo Horizonte"],
+    "Colombia": ["Bogota", "Medellin", "Cartagena"],
+    "Argentina": ["Buenos Aires", "Cordoba", "Rosario"],
+    "Chile": ["Santiago", "Valparaiso"],
+    "Nigeria": ["Lagos", "Abuja", "Port Harcourt"],
+    "Kenya": ["Nairobi", "Mombasa"],
+    "Egypt": ["Cairo", "Alexandria"],
+    "Turkey": ["Istanbul", "Ankara", "Izmir", "Antalya"],
+    "Pakistan": ["Karachi", "Lahore", "Islamabad", "Rawalpindi"],
+    "Bangladesh": ["Dhaka", "Chittagong"],
+    "Sri Lanka": ["Colombo", "Kandy"],
+    "Nepal": ["Kathmandu", "Pokhara"],
+}
+
 # Business categories to target
 DEFAULT_CATEGORIES = [
     "restaurants",
@@ -79,24 +149,53 @@ DEFAULT_CATEGORIES = [
 ]
 
 
-def generate_all_queries(categories=None, cities_dict=None):
+def generate_all_queries(categories=None, include_international=True):
     """
     Generate all possible (query, city, country) tuples.
     Returns a list of (query_string, city_name, country).
     """
     if categories is None:
         categories = DEFAULT_CATEGORIES
-    if cities_dict is None:
-        cities_dict = INDIA_CITIES
 
     queries = []
-    for state, cities in cities_dict.items():
+
+    # India queries
+    for state, cities in INDIA_CITIES.items():
         for city in cities:
             for category in categories:
                 query = f"{category} in {city}"
                 queries.append((query, city, "India"))
 
+    # International queries
+    if include_international:
+        for country, cities in INTERNATIONAL_CITIES.items():
+            for city in cities:
+                for category in categories:
+                    query = f"{category} in {city}"
+                    queries.append((query, city, country))
+
     logger.info(f"Generated {len(queries)} total query combinations")
+    return queries
+
+
+def generate_india_queries(categories=None):
+    """Generate queries for India only."""
+    return generate_all_queries(categories=categories, include_international=False)
+
+
+def generate_international_queries(categories=None):
+    """Generate queries for international only."""
+    if categories is None:
+        categories = DEFAULT_CATEGORIES
+
+    queries = []
+    for country, cities in INTERNATIONAL_CITIES.items():
+        for city in cities:
+            for category in categories:
+                query = f"{category} in {city}"
+                queries.append((query, city, country))
+
+    logger.info(f"Generated {len(queries)} international queries")
     return queries
 
 
@@ -135,9 +234,26 @@ def mark_query_scraped(query, city, country, results_count):
         conn.close()
 
 
+def get_country_for_city(city):
+    """Look up which country a city belongs to."""
+    for state, cities in INDIA_CITIES.items():
+        if city in cities:
+            return "India"
+    for country, cities in INTERNATIONAL_CITIES.items():
+        if city in cities:
+            return country
+    return None
+
+
 if __name__ == "__main__":
     queries = generate_all_queries()
+    india_count = sum(1 for _, _, c in queries if c == "India")
+    intl_count = len(queries) - india_count
+    countries = set(c for _, _, c in queries)
     print(f"Total queries: {len(queries)}")
-    for q, city, country in queries[:20]:
-        print(f"  {q}")
-    print(f"  ... and {len(queries) - 20} more")
+    print(f"  India: {india_count}")
+    print(f"  International: {intl_count}")
+    print(f"  Countries: {len(countries)}")
+    print(f"\nSample queries:")
+    for q, city, country in queries[:10]:
+        print(f"  [{country}] {q}")

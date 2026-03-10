@@ -1,7 +1,8 @@
 """
-India-scale cold email campaign.
-Scrapes Google Maps across ALL Indian cities/categories,
-finds emails, sends personalized cold emails via Gmail.
+Worldwide cold email campaign.
+Scrapes Google Maps across India + 35+ countries,
+finds emails, sends personalized cold emails.
+India -> Gmail SMTP | International -> Resend API.
 Never sends to the same lead twice. Tracks scraped queries.
 """
 import asyncio
@@ -10,10 +11,9 @@ import yaml
 import time
 import random
 import os
-import sys
 from database.db import (
     init_db, insert_lead, get_unsent_leads, sync_gmail_accounts,
-    record_email_sent, increment_sent_count, get_connection,
+    record_email_sent, increment_sent_count,
     reset_daily_counts, get_email_stats, mark_query_scraped,
     is_query_scraped, get_total_unsent_count,
 )
@@ -22,6 +22,7 @@ from scraper.website_email_scraper import scrape_email_from_website
 from scraper.lead_filter import is_valid_email_format
 from scraper.query_generator import generate_all_queries, get_unscraped_queries
 from emailer.gmail_sender import send_email, pick_gmail_account
+from emailer.resend_sender import send_via_resend
 from emailer.tracker import print_report
 from jinja2 import Template
 
@@ -46,26 +47,30 @@ def load_config():
         return yaml.safe_load(f)
 
 
-def load_template():
-    """Load the India email template."""
-    path = os.path.join(CONFIG_DIR, "email_templates", "template_india.html")
+def load_template(country):
+    """Load the right template based on country."""
+    if country and country.lower() == "india":
+        path = os.path.join(CONFIG_DIR, "email_templates", "template_india.html")
+    else:
+        path = os.path.join(CONFIG_DIR, "email_templates", "template_international.html")
+
     if os.path.exists(path):
         with open(path) as f:
             return f.read()
+
     # Fallback to restaurant template
-    path = os.path.join(CONFIG_DIR, "email_templates", "template_restaurant.html")
-    with open(path) as f:
+    fallback = os.path.join(CONFIG_DIR, "email_templates", "template_restaurant.html")
+    with open(fallback) as f:
         return f.read()
 
 
 async def scrape_phase(config, max_queries=50):
     """
-    Scrape Google Maps for business leads across India.
+    Scrape Google Maps for business leads worldwide.
     Only runs queries that haven't been scraped before.
     """
-    # Generate all queries from config
     categories = config.get("target_categories", None)
-    all_queries = generate_all_queries(categories=categories)
+    all_queries = generate_all_queries(categories=categories, include_international=True)
 
     # Filter to only unscraped queries
     unscraped = get_unscraped_queries(all_queries)
@@ -74,7 +79,6 @@ async def scrape_phase(config, max_queries=50):
         logger.info("All queries have been scraped! No new queries to run.")
         return 0
 
-    # Limit per run to avoid extremely long sessions
     batch = unscraped[:max_queries]
     logger.info(f"\nScraping {len(batch)} queries (of {len(unscraped)} remaining)...")
 
@@ -85,7 +89,7 @@ async def scrape_phase(config, max_queries=50):
 
     total = 0
     for i, (query, city, country) in enumerate(batch, 1):
-        logger.info(f"\n[{i}/{len(batch)}] Scraping: {query}")
+        logger.info(f"\n[{i}/{len(batch)}] Scraping: {query} [{country}]")
 
         try:
             results = await scrape_google_maps(
@@ -136,39 +140,40 @@ async def scrape_phase(config, max_queries=50):
             )
             saved += 1
 
-        # Mark this query as done
         mark_query_scraped(query, city, country, saved)
         total += saved
         logger.info(f"  Saved {saved} leads from '{query}'. Total this run: {total}")
 
-        # Brief pause between queries
         await asyncio.sleep(random.uniform(1, 3))
 
     return total
 
 
 def send_phase(config):
-    """Send cold emails to all unsent leads with email addresses."""
-    template_html = load_template()
+    """
+    Send cold emails to all unsent leads.
+    India -> Gmail SMTP | International -> Resend API.
+    """
     sender_info = config.get("sender", {})
     warmup_schedule = config.get("warmup_schedule", {999: 100})
     email_settings = config.get("email_settings", {})
+    resend_config = config.get("resend", {})
     daily_target = email_settings.get("daily_total_target", 100)
     min_delay = email_settings.get("min_delay_seconds", 15)
     max_delay = email_settings.get("max_delay_seconds", 45)
 
     reset_daily_counts()
 
-    # Get unsent leads with emails
     leads = get_unsent_leads(limit=daily_target)
     if not leads:
         logger.info("No unsent leads with emails available.")
         return 0
 
     logger.info(f"\nSending emails to {len(leads)} leads...")
-    template = Template(template_html)
-    sent = 0
-    failed = 0
+
+    # Pre-load templates
+    india_template = Template(load_template("India"))
+    intl_template = Template(load_template("International"))
 
     subject_templates = [
         "Never miss a phone order again, {name}",
@@ -177,12 +182,17 @@ def send_phase(config):
         "AI assistant for {name} — free demo",
     ]
 
+    sent = 0
+    failed = 0
+    intl_sent_today = 0
+    resend_limit = resend_config.get("daily_limit", 200)
+
     for lead in leads:
-        # Pick Gmail account
-        account = pick_gmail_account(warmup_schedule)
-        if not account:
-            logger.warning("All accounts at daily limit. Stopping.")
-            break
+        country = lead["country"] or ""
+        is_india = country.lower() == "india"
+
+        # Pick the right template
+        template = india_template if is_india else intl_template
 
         # Render email
         city = lead["location"] or "your area"
@@ -202,30 +212,66 @@ def send_phase(config):
 
         subject = random.choice(subject_templates).format(name=lead["business_name"])
 
-        success = send_email(lead["email"], subject, html_body, account)
+        if is_india:
+            # Send via Gmail
+            account = pick_gmail_account(warmup_schedule)
+            if not account:
+                logger.warning("All Gmail accounts at daily limit.")
+                # Try Resend as fallback for remaining Indian leads
+                if intl_sent_today < resend_limit and resend_config.get("api_key"):
+                    success = send_via_resend(lead["email"], subject, html_body, resend_config)
+                    sender_id = resend_config.get("from_email", "resend")
+                else:
+                    continue
+            else:
+                success = send_email(lead["email"], subject, html_body, account)
+                sender_id = account["email"]
+                if success:
+                    increment_sent_count(account["email"])
+        else:
+            # International -> Resend API
+            if intl_sent_today >= resend_limit:
+                logger.warning(f"Resend daily limit ({resend_limit}) reached. Skipping international.")
+                continue
+
+            if not resend_config.get("api_key"):
+                # Fallback to Gmail for international if no Resend
+                account = pick_gmail_account(warmup_schedule)
+                if not account:
+                    continue
+                success = send_email(lead["email"], subject, html_body, account)
+                sender_id = account["email"]
+                if success:
+                    increment_sent_count(account["email"])
+            else:
+                success = send_via_resend(lead["email"], subject, html_body, resend_config)
+                sender_id = resend_config.get("from_email", "resend")
+                if success:
+                    intl_sent_today += 1
+
         status = "sent" if success else "bounced"
-        record_email_sent(lead["id"], account["email"], "india_cold", status)
-        increment_sent_count(account["email"])
+        template_name = "india_cold" if is_india else "international_cold"
+        record_email_sent(lead["id"], sender_id, template_name, status)
 
         if success:
             sent += 1
-            logger.info(f"  [{sent}] Sent to {lead['email']} ({lead['business_name']})")
+            tag = "🇮🇳" if is_india else "🌍"
+            logger.info(f"  {tag} [{sent}] Sent to {lead['email']} ({lead['business_name']})")
         else:
             failed += 1
             logger.warning(f"  Failed: {lead['email']} ({lead['business_name']})")
 
-        # Delay between sends
         delay = random.uniform(min_delay, max_delay)
         time.sleep(delay)
 
-    logger.info(f"\nDone! Sent: {sent}, Failed: {failed}")
+    logger.info(f"\nDone! Sent: {sent} (Intl via Resend: {intl_sent_today}), Failed: {failed}")
     return sent
 
 
 async def run_full_cycle(config, max_queries=50):
     """Run a complete scrape + send cycle."""
     print("\n" + "=" * 60)
-    print("  AXENORA AI — INDIA-SCALE EMAIL CAMPAIGN")
+    print("  AXENORA AI — WORLDWIDE EMAIL CAMPAIGN")
     print("=" * 60)
 
     stats = get_email_stats()
@@ -255,12 +301,13 @@ async def run_full_cycle(config, max_queries=50):
 
 async def main():
     import argparse
-    parser = argparse.ArgumentParser(description="India-Scale Cold Email Campaign")
+    parser = argparse.ArgumentParser(description="Worldwide Cold Email Campaign")
     parser.add_argument("--scrape-only", action="store_true", help="Only scrape, don't send")
     parser.add_argument("--send-only", action="store_true", help="Only send, don't scrape")
     parser.add_argument("--report", action="store_true", help="Show stats only")
     parser.add_argument("--max-queries", type=int, default=50, help="Max queries per scrape run")
     parser.add_argument("--dry-run", action="store_true", help="Scrape but don't send")
+    parser.add_argument("--india-only", action="store_true", help="Only scrape India queries")
     args = parser.parse_args()
 
     config = load_config()
@@ -270,9 +317,13 @@ async def main():
     if args.report:
         print_report()
         stats = get_email_stats()
-        all_queries = generate_all_queries(config.get("target_categories"))
+        all_queries = generate_all_queries(config.get("target_categories"), include_international=True)
         unscraped = get_unscraped_queries(all_queries)
+        india_q = sum(1 for _, _, c in all_queries if c == "India")
+        intl_q = len(all_queries) - india_q
         print(f"  Total possible queries:  {len(all_queries)}")
+        print(f"    India:                 {india_q}")
+        print(f"    International:         {intl_q}")
         print(f"  Queries scraped:         {stats.get('queries_scraped', 0)}")
         print(f"  Queries remaining:       {len(unscraped)}")
         return
