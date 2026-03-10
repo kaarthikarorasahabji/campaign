@@ -43,8 +43,35 @@ def is_franchise(name):
 
 
 def load_config():
-    with open(os.path.join(CONFIG_DIR, "settings.yaml"), encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    settings_path = os.path.join(CONFIG_DIR, "settings.yaml")
+    if os.path.exists(settings_path):
+        with open(settings_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        config = {}
+
+    # Defaults for when settings.yaml is missing (Railway / production)
+    config.setdefault("warmup_schedule", {3: 15, 7: 25, 14: 40, 999: 50})
+    config.setdefault("target_categories", [
+        "restaurants", "clinics", "dentists", "gyms", "pet shops",
+        "car wash", "laundry", "salons", "spas", "cafes", "bakeries",
+        "pharmacies", "coaching centers",
+    ])
+    config.setdefault("email_settings", {
+        "min_delay_seconds": 20, "max_delay_seconds": 60,
+        "daily_total_target": 50, "send_hours_start": 9, "send_hours_end": 19,
+    })
+    config.setdefault("scraper_settings", {
+        "min_delay_seconds": 2, "max_delay_seconds": 5,
+        "max_results_per_query": 15, "headless": True,
+    })
+    config.setdefault("sender", {
+        "name": os.environ.get("SENDER_NAME", "Kaarthik Dass Arora"),
+        "company": os.environ.get("SENDER_COMPANY", "Axenora Ai"),
+        "phone": os.environ.get("SENDER_PHONE", "+91 7814051678"),
+        "website": os.environ.get("SENDER_WEBSITE", "https://axenoraai.in"),
+        "calendar_link": os.environ.get("SENDER_CALENDAR", "https://calendly.com/kaarthikdassarorasahabji"),
+    })
 
     # Override secrets from environment variables (for Railway / production)
     # Gmail accounts from env
